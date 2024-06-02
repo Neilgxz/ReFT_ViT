@@ -1,0 +1,12 @@
+_BASE_: "../base-reft.yaml"
+RUN_N_TIMES: 1
+DATA:
+  NAME: "vtab-cifar(num_classes=100)"
+  DATAPATH: "./Datasets"  
+  NUMBER_CLASSES: 100
+  MULTILABEL: False
+MODEL:
+  TYPE: "vit"
+SOLVER:
+  BASE_LR: 0.001
+  WEIGHT_DECAY: 0.0001
