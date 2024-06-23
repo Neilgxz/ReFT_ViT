@@ -8,10 +8,8 @@ import os
 import torch
 import warnings
 import random
-
 from time import sleep
 from random import randint
-
 import src.utils.logging as logging
 from src.configs.config import get_cfg
 from src.data import loader as data_loader
@@ -19,11 +17,9 @@ from src.engine.evaluator import Evaluator
 from src.engine.trainer import Trainer
 from src.models.build_model import build_model
 from src.utils.file_io import PathManager
-
 from launch import default_argument_parser, logging_train_setup
 warnings.filterwarnings("ignore")
 
-torch.autograd.set_detect_anomaly(True)
 
 DATA2CLS = {
     'caltech101': 102,
@@ -90,13 +86,13 @@ def setup(args, lr, wd, final_runs, run_idx=None, seed=None):
     cfg = get_cfg()
     cfg.merge_from_file(args.config_file)
     cfg.merge_from_list(args.opts)
-
     cfg.SEED = seed
-
+    
+    device = int(args.device)
     if not final_runs:
         cfg.RUN_N_TIMES = 1
         cfg.MODEL.SAVE_CKPT = False
-        cfg.OUTPUT_DIR = cfg.OUTPUT_DIR + "_val"
+        cfg.OUTPUT_DIR = cfg.OUTPUT_DIR + "_val" + "_GPU" + str(device)
         lr = lr / 256 * cfg.DATA.BATCH_SIZE  # update lr based on the batchsize
         cfg.SOLVER.BASE_LR = lr
         cfg.SOLVER.WEIGHT_DECAY = wd
@@ -104,9 +100,9 @@ def setup(args, lr, wd, final_runs, run_idx=None, seed=None):
         cfg.RUN_N_TIMES = 5
         cfg.MODEL.SAVE_CKPT = False
         # find the best lr and best wd
-        files = glob.glob(f"{cfg.OUTPUT_DIR}_val/{cfg.DATA.NAME}/{cfg.DATA.FEATURE}/*/run1/eval_results.pth")
+        files = glob.glob(f"{cfg.OUTPUT_DIR}_val_GPU{str(device)}/{cfg.DATA.NAME}/{cfg.DATA.FEATURE}/*/run1/eval_results.pth")
         lr, wd = find_best_lrwd(files, cfg.DATA.NAME)
-        cfg.OUTPUT_DIR = cfg.OUTPUT_DIR + "_finalfinal"
+        cfg.OUTPUT_DIR = cfg.OUTPUT_DIR + "_finalfinal" + "_GPU" + str(device)
         cfg.SOLVER.BASE_LR = lr
         cfg.SOLVER.WEIGHT_DECAY = wd
 
@@ -185,15 +181,15 @@ def train(cfg, args, final_runs):
         torch.manual_seed(cfg.SEED)
         np.random.seed(cfg.SEED)
         random.seed(0)
-
+ 
     # setup training env including loggers
     logging_train_setup(args, cfg)
-    logger = logging.get_logger("visual_prompt")
+    logger = logging.get_logger("visual_reft")
 
     train_loader, val_loader, test_loader = get_loaders(
         cfg, logger, final_runs)
     logger.info("Constructing models...")
-    model, cur_device = build_model(cfg)
+    model, cur_device = build_model(cfg, args)
 
     logger.info("Setting up Evalutator...")
     evaluator = Evaluator()
@@ -219,7 +215,6 @@ def get_lrwd_range(args):
 
     elif args.train_type == "linear" or "reft":
         lr_range = [
-            50.0, 25., 10.0,
             5.0, 2.5, 1.0,
             0.5, 0.25, 0.1, 0.05
         ]
@@ -251,16 +246,16 @@ def main(args):
                 continue
             train(cfg, args, final_runs=False)
 
-    # final run 5 times with fixed seed
-    random_seeds = [42, 44, 82, 100, 800]
-    for run_idx, seed in enumerate(random_seeds):
-        try:
-            cfg = setup(
-                args, 0.1, 0.1, final_runs=True, run_idx=run_idx+1, seed=seed)
-        except ValueError:
-            # already ran
-            continue
-        train(cfg, args, final_runs=True)
+    # # final run 5 times with fixed seed
+    # random_seeds = [42, 44, 82, 100, 800]
+    # for run_idx, seed in enumerate(random_seeds):
+    #     try:
+    #         cfg = setup(
+    #             args, 0.1, 0.1, final_runs=True, run_idx=run_idx+1, seed=seed)
+    #     except ValueError:
+    #         # already ran
+    #         continue
+    #     train(cfg, args, final_runs=True)
 
 
 if __name__ == '__main__':

@@ -10,14 +10,12 @@ import PIL
 from collections import defaultdict
 from tabulate import tabulate
 from typing import Tuple
-
+os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
 import torch
 from src.utils.file_io import PathManager
 from src.utils import logging
 from src.utils.distributed import get_rank, get_world_size
 
-# added 5/21/2024 for Debug
-os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 
 def collect_torch_env() -> str:
     try:
@@ -69,11 +67,13 @@ def default_argument_parser():
     """
     create a simple parser to wrap around config file
     """
-    parser = argparse.ArgumentParser(description="visual-prompt")
+    parser = argparse.ArgumentParser(description="visual-reft")
     parser.add_argument(
-        "--config-file", default="./configs/reft/cifar100.yaml", metavar="FILE", help="path to config file")
+        "--config-file", default="./configs/reft/cifar100_0.yaml", metavar="FILE", help="path to config file")
     parser.add_argument(
         "--train-type", default="reft", help="training types")
+    parser.add_argument(
+        "--device", default=0, help="device id")
     parser.add_argument(
         "opts",
         help="Modify config options using the command-line",
@@ -90,7 +90,7 @@ def logging_train_setup(args, cfg) -> None:
         PathManager.mkdirs(output_dir)
 
     logger = logging.setup_logging(
-        cfg.NUM_GPUS, get_world_size(), output_dir, name="visual_prompt")
+        cfg.NUM_GPUS, get_world_size(), output_dir, name="visual_reft")
 
     # Log basic information about environment, cmdline arguments, and config
     rank = get_rank()
