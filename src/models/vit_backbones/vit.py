@@ -8,19 +8,15 @@ https://github.com/jeonsworld/ViT-pytorch/blob/main/models/modeling.py
 import copy
 import logging
 import math
-
 import torch
 import torch.nn as nn
 import numpy as np
-
 from torch.nn import Dropout, Softmax, Linear, Conv2d, LayerNorm
 from torch.nn.modules.utils import _pair
 from scipy import ndimage
-
 from ...configs import vit_configs as configs
-
-
 logger = logging.getLogger(__name__)
+
 
 CONFIGS = {
     "sup_vitb16_224": configs.get_b16_config(),
@@ -56,10 +52,13 @@ def np2th(weights, conv=False):
 def swish(x):
     return x * torch.sigmoid(x)
 
+
 def LinearActivation(x):
     return x
     
+
 ACT2FN = {"gelu": torch.nn.functional.gelu, "relu": torch.nn.functional.relu, "swish": swish, "linear": LinearActivation}   
+
 
 from collections import OrderedDict
 class LowRankRotateLayer(torch.nn.Module):
@@ -92,7 +91,7 @@ class LoreftIntervention(torch.nn.Module):
         self.rotate_layer = torch.nn.utils.parametrizations.orthogonal(rotate_layer)
         self.learned_source = torch.nn.Linear(self.embed_dim, kwargs["low_rank_dimension"])
         self.dropout = torch.nn.Dropout(kwargs["dropout"] if "dropout" in kwargs else 0.0)
-        self.act_fn = ACT2FN["linear"] if "act_fn" not in kwargs or kwargs["act_fn"] is None else ACT2FN[kwargs["act_fn"]]
+        self.act_fn = ACT2FN["linear"] if "activation" not in kwargs or kwargs["activation"] is None else ACT2FN[kwargs["activation"]]
         
     def forward(
         self, base, source=None, subspaces=None
@@ -122,6 +121,34 @@ class LoreftIntervention(torch.nn.Module):
         overload_w_width = overload_w.shape[-1]
         self.rotate_layer.parametrizations.weight[0].base[:,:overload_w_width] = overload_w
         return
+    
+    
+class NoreftIntervention(torch.nn.Module):
+    """
+    NoReFT(h) = h + W2^T(W1h + b − W2h)
+    """
+    def __init__(self, **kwargs):
+        super().__init__()
+        if "embed_dim" in kwargs and kwargs["embed_dim"] is not None:
+            self.register_buffer('embed_dim', torch.tensor(kwargs["embed_dim"]))
+            self.register_buffer('interchange_dim', torch.tensor(kwargs["embed_dim"]))
+        else:
+            self.embed_dim = None
+            self.interchange_dim = None
+
+        self.proj_layer = torch.nn.Linear(self.embed_dim, kwargs["low_rank_dimension"])
+        self.learned_source = torch.nn.Linear(self.embed_dim, kwargs["low_rank_dimension"])
+        self.dropout = torch.nn.Dropout(kwargs["dropout"] if "dropout" in kwargs else 0.0)
+        self.act_fn = ACT2FN["linear"] if "activation" not in kwargs or kwargs["activation"] is None else ACT2FN[kwargs["activation"]]
+        
+    def forward(
+        self, base, source=None, subspaces=None
+    ):
+        proj_base = self.proj_layer(base)
+        output = base + torch.matmul(
+            (self.act_fn(self.learned_source(base)) - proj_base), self.proj_layer.weight
+        )
+        return self.dropout(output.to(base.dtype))
     
 
 class Attention(nn.Module):
@@ -205,13 +232,13 @@ class Embeddings(nn.Module):
         img_size = _pair(img_size)
 
         patch_size = _pair(config.patches["size"])
-        n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
+        self.n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
 
         self.patch_embeddings = Conv2d(in_channels=in_channels,
                                        out_channels=config.hidden_size,
                                        kernel_size=patch_size,
                                        stride=patch_size)
-        self.position_embeddings = nn.Parameter(torch.zeros(1, n_patches+1, config.hidden_size))
+        self.position_embeddings = nn.Parameter(torch.zeros(1, self.n_patches+1, config.hidden_size))
         self.cls_token = nn.Parameter(torch.zeros(1, 1, config.hidden_size))
 
         self.dropout = Dropout(config.transformer["dropout_rate"])
@@ -292,9 +319,9 @@ class Block(nn.Module):
 
 
 ################################################################################################  
-class Block_REFT(nn.Module):
+class Block_REFT_single(nn.Module):
     def __init__(self, config, reft_cfg, vis):
-        super(Block_REFT, self).__init__()
+        super(Block_REFT_single, self).__init__()
         self.hidden_size = config.hidden_size
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
@@ -303,10 +330,11 @@ class Block_REFT(nn.Module):
 
         self.reft = LoreftIntervention(
             embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
-            dropout=reft_cfg.DROPOUT
+            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
         )
         nn.init.xavier_uniform_(self.reft.learned_source.weight)
         nn.init.normal_(self.reft.learned_source.bias, std=1e-6)
+
 
     def forward(self, x):
         h = x
@@ -317,12 +345,255 @@ class Block_REFT(nn.Module):
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
-        x = x + h # x ([800, 197, 768])
+        x = x + h # x ([batch_size, 197, 768])
 
-        ### add intervention for CLS token
+        # ### add intervention for CLS tokens
+        # cls_token = x[:,0,:]
+        # intervened_cls_token = self.reft(cls_token)
+        # intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), x[:, 1:, :]), dim=1)
+
+        ### apply one intervention to all patch tokens
+        patch_token = x[:,1:,:]
+        intervened_patch_token = self.reft(patch_token)
+        intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_token), dim=1)   
+
+        return intervened_x, weights
+
+    def load_from(self, weights, n_block):
+        ROOT = f"Transformer/encoderblock_{n_block}"
+        with torch.no_grad():
+            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+            query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            out_weight = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+
+            query_bias = np2th(weights['/'.join((ROOT, ATTENTION_Q, "bias"))]).view(-1)
+            key_bias = np2th(weights['/'.join((ROOT, ATTENTION_K, "bias"))]).view(-1)
+            value_bias = np2th(weights['/'.join((ROOT, ATTENTION_V, "bias"))]).view(-1)
+            out_bias = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "bias"))]).view(-1)
+
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
+            self.attn.out.weight.copy_(out_weight)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
+            self.attn.out.bias.copy_(out_bias)
+
+            mlp_weight_0 = np2th(weights['/'.join((ROOT, FC_0, "kernel"))]).t()
+            mlp_weight_1 = np2th(weights['/'.join((ROOT, FC_1, "kernel"))]).t()
+            mlp_bias_0 = np2th(weights['/'.join((ROOT, FC_0, "bias"))]).t()
+            mlp_bias_1 = np2th(weights['/'.join((ROOT, FC_1, "bias"))]).t()
+
+            self.ffn.fc1.weight.copy_(mlp_weight_0)
+            self.ffn.fc2.weight.copy_(mlp_weight_1)
+            self.ffn.fc1.bias.copy_(mlp_bias_0)
+            self.ffn.fc2.bias.copy_(mlp_bias_1)
+
+            self.attention_norm.weight.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "scale"))]))
+            self.attention_norm.bias.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "bias"))]))
+            self.ffn_norm.weight.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "scale"))]))
+            self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
+
+
+class Block_REFT_single_v2(nn.Module):
+    def __init__(self, config, reft_cfg, vis):
+        super(Block_REFT_single_v2, self).__init__()
+        self.hidden_size = config.hidden_size
+        self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn = Mlp(config)
+        self.attn = Attention(config, vis)
+
+        self.reft = LoreftIntervention(
+            embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
+            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
+        )
+        nn.init.xavier_uniform_(self.reft.learned_source.weight)
+        nn.init.normal_(self.reft.learned_source.bias, std=1e-6)
+
+
+    def forward(self, x):
+        h = x
+        x = self.attention_norm(x)
+        x, weights = self.attn(x)
+        x = x + h
+
+        h = x
+        x = self.ffn_norm(x)
+        x = self.ffn(x)
+        x = x + h # x ([batch_size, 197, 768])
+
+        ### apply one intervention to all tokens
+        intervened_x = self.reft(x)   
+
+        return intervened_x, weights
+
+    def load_from(self, weights, n_block):
+        ROOT = f"Transformer/encoderblock_{n_block}"
+        with torch.no_grad():
+            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+            query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            out_weight = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+
+            query_bias = np2th(weights['/'.join((ROOT, ATTENTION_Q, "bias"))]).view(-1)
+            key_bias = np2th(weights['/'.join((ROOT, ATTENTION_K, "bias"))]).view(-1)
+            value_bias = np2th(weights['/'.join((ROOT, ATTENTION_V, "bias"))]).view(-1)
+            out_bias = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "bias"))]).view(-1)
+
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
+            self.attn.out.weight.copy_(out_weight)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
+            self.attn.out.bias.copy_(out_bias)
+
+            mlp_weight_0 = np2th(weights['/'.join((ROOT, FC_0, "kernel"))]).t()
+            mlp_weight_1 = np2th(weights['/'.join((ROOT, FC_1, "kernel"))]).t()
+            mlp_bias_0 = np2th(weights['/'.join((ROOT, FC_0, "bias"))]).t()
+            mlp_bias_1 = np2th(weights['/'.join((ROOT, FC_1, "bias"))]).t()
+
+            self.ffn.fc1.weight.copy_(mlp_weight_0)
+            self.ffn.fc2.weight.copy_(mlp_weight_1)
+            self.ffn.fc1.bias.copy_(mlp_bias_0)
+            self.ffn.fc2.bias.copy_(mlp_bias_1)
+
+            self.attention_norm.weight.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "scale"))]))
+            self.attention_norm.bias.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "bias"))]))
+            self.ffn_norm.weight.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "scale"))]))
+            self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
+
+
+class Block_REFT_double(nn.Module):
+    def __init__(self, config, reft_cfg, vis):
+        super(Block_REFT_double, self).__init__()
+        self.hidden_size = config.hidden_size
+        self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn = Mlp(config)
+        self.attn = Attention(config, vis)
+
+        self.reft_cls = LoreftIntervention(
+            embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
+            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
+        )
+        nn.init.xavier_uniform_(self.reft_cls.learned_source.weight)
+        nn.init.normal_(self.reft_cls.learned_source.bias, std=1e-6)
+
+        self.reft_image = LoreftIntervention(
+            embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
+            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
+        )
+        nn.init.xavier_uniform_(self.reft_image.learned_source.weight)
+        nn.init.normal_(self.reft_image.learned_source.bias, std=1e-6)
+
+
+    def forward(self, x):
+        h = x
+        x = self.attention_norm(x)
+        x, weights = self.attn(x)
+        x = x + h
+
+        h = x
+        x = self.ffn_norm(x)
+        x = self.ffn(x)
+        x = x + h # x ([batch_size, 197, 768])
+
+        ### add intervention for CLS tokens
         cls_token = x[:,0,:]
-        intervened_cls_token = self.reft(cls_token)
-        intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), x[:, 1:, :]), dim=1)
+        intervened_cls_token = self.reft_cls(cls_token)
+
+        ### apply one intervention to all patch tokens
+        patch_token = x[:,1:,:]
+        intervened_patch_token = self.reft_image(patch_token)
+
+        intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), intervened_patch_token), dim=1)   
+
+        return intervened_x, weights
+
+    def load_from(self, weights, n_block):
+        ROOT = f"Transformer/encoderblock_{n_block}"
+        with torch.no_grad():
+            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+            query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+            out_weight = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
+
+            query_bias = np2th(weights['/'.join((ROOT, ATTENTION_Q, "bias"))]).view(-1)
+            key_bias = np2th(weights['/'.join((ROOT, ATTENTION_K, "bias"))]).view(-1)
+            value_bias = np2th(weights['/'.join((ROOT, ATTENTION_V, "bias"))]).view(-1)
+            out_bias = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "bias"))]).view(-1)
+
+            self.attn.query.weight.copy_(query_weight)
+            self.attn.key.weight.copy_(key_weight)
+            self.attn.value.weight.copy_(value_weight)
+            self.attn.out.weight.copy_(out_weight)
+            self.attn.query.bias.copy_(query_bias)
+            self.attn.key.bias.copy_(key_bias)
+            self.attn.value.bias.copy_(value_bias)
+            self.attn.out.bias.copy_(out_bias)
+
+            mlp_weight_0 = np2th(weights['/'.join((ROOT, FC_0, "kernel"))]).t()
+            mlp_weight_1 = np2th(weights['/'.join((ROOT, FC_1, "kernel"))]).t()
+            mlp_bias_0 = np2th(weights['/'.join((ROOT, FC_0, "bias"))]).t()
+            mlp_bias_1 = np2th(weights['/'.join((ROOT, FC_1, "bias"))]).t()
+
+            self.ffn.fc1.weight.copy_(mlp_weight_0)
+            self.ffn.fc2.weight.copy_(mlp_weight_1)
+            self.ffn.fc1.bias.copy_(mlp_bias_0)
+            self.ffn.fc2.bias.copy_(mlp_bias_1)
+
+            self.attention_norm.weight.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "scale"))]))
+            self.attention_norm.bias.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "bias"))]))
+            self.ffn_norm.weight.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "scale"))]))
+            self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
+
+
+class Block_REFT_multiple(nn.Module):
+    def __init__(self, config, reft_cfg, n_patches, vis):
+        super(Block_REFT_multiple, self).__init__()
+        self.hidden_size = config.hidden_size
+        self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        self.ffn = Mlp(config)
+        self.attn = Attention(config, vis)
+
+        self.refts = nn.ModuleList([
+            LoreftIntervention(
+            embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
+            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
+        ) for _ in range(n_patches)])
+
+        for reft in self.refts:
+            nn.init.xavier_uniform_(reft.learned_source.weight)
+            nn.init.normal_(reft.learned_source.bias, std=1e-6)
+
+    def forward(self, x):
+        h = x
+        x = self.attention_norm(x)
+        x, weights = self.attn(x)
+        x = x + h
+
+        h = x
+        x = self.ffn_norm(x)
+        x = self.ffn(x)
+        x = x + h # x ([batch_size, 197, 768])
+
+        ### apply one intervention to each patch token
+        reft_outputs = []
+        for i in range(x.shape[1]-1):
+            intervened_patch_token = self.refts[i](x[:, i+1, :])
+            reft_outputs.append(intervened_patch_token.unsqueeze(1))
+        intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
+        intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_tokens), dim=1)  
+
         return intervened_x, weights
 
     def load_from(self, weights, n_block):
@@ -366,18 +637,29 @@ class Block_REFT(nn.Module):
 
 ################################################################################################ 
 class Encoder(nn.Module):
-    def __init__(self, config, reft_cfg, vis):
+    def __init__(self, config, reft_cfg, n_patches, vis):
         super(Encoder, self).__init__()
         self.vis = vis
         self.layer = nn.ModuleList()
         self.encoder_norm = LayerNorm(config.hidden_size, eps=1e-6)
+        if reft_cfg.ALLLAYERS:
+            layers = list(range(config.transformer["num_layers"]))
+        else:
+            layers = reft_cfg.LAYERS
         for layer_index in range(config.transformer["num_layers"]):
-            if reft_cfg.LAYERS == "ALL":
-                layer = Block_REFT(config, reft_cfg, vis)
-                self.layer.append(copy.deepcopy(layer))
-            elif layer_index in reft_cfg.LAYERS:
-                layer = Block_REFT(config, reft_cfg, vis)
-                self.layer.append(copy.deepcopy(layer))
+            if layer_index in layers:
+                if reft_cfg.MULTIPLE:
+                    layer = Block_REFT_multiple(config, reft_cfg, n_patches, vis)
+                    self.layer.append(copy.deepcopy(layer))
+                elif reft_cfg.DOUBLE:
+                    layer = Block_REFT_double(config, reft_cfg, vis)
+                    self.layer.append(copy.deepcopy(layer))
+                elif reft_cfg.CLSIMAGE:
+                    layer = Block_REFT_single_v2(config, reft_cfg, vis)
+                    self.layer.append(copy.deepcopy(layer))
+                else:
+                    layer = Block_REFT_single(config, reft_cfg, vis)
+                    self.layer.append(copy.deepcopy(layer))
             else:
                 layer = Block(config, vis)
                 self.layer.append(copy.deepcopy(layer))
@@ -413,8 +695,13 @@ class Encoder(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, config, reft_cfg, img_size, vis): 
         super(Transformer, self).__init__()
+
+        img_size = _pair(img_size)
+        patch_size = _pair(config.patches["size"])
+        self.n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
+
         self.embeddings = Embeddings(config, img_size=img_size)
-        self.encoder = Encoder(config, reft_cfg, vis) 
+        self.encoder = Encoder(config, reft_cfg, self.n_patches, vis) 
 
     def forward(self, input_ids):
         embedding_output = self.embeddings(input_ids)
@@ -438,7 +725,7 @@ class VisionTransformer(nn.Module):
         config = CONFIGS[model_type]
         self.num_classes = num_classes
         self.classifier = config.classifier
-      
+        
         self.transformer = Transformer(config, reft_cfg, img_size, vis) 
         self.head = Linear(config.hidden_size, num_classes) if num_classes > 0 else nn.Identity()
 
@@ -501,5 +788,4 @@ class VisionTransformer(nn.Module):
                 for bname, block in self.transformer.embeddings.hybrid_model.body.named_children():
                     for uname, unit in block.named_children():
                         unit.load_from(weights, n_block=bname, n_unit=uname)
-
 
