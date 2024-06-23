@@ -4,6 +4,7 @@ import torch
 import os
 from .vit_backbones.swin_transformer import SwinTransformer
 from .vit_backbones.vit import VisionTransformer
+from .vit_backbones.vit_prompt import PromptedVisionTransformer
 from .vit_backbones.vit_moco import vit_base
 from .vit_backbones.vit_mae import build_model as mae_vit_model
 
@@ -209,7 +210,7 @@ def _build_swin_model(model_type, crop_size, model_root):
 
 
 def build_vit_sup_models(
-    model_type, crop_size, reft_cfg=None, model_root=None, load_pretrain=True, vis=False
+    model_type, crop_size, reft_cfg=None, prompt_cfg=None, model_root=None, load_pretrain=True, vis=False
 ):
     # image size is the size of actual image
     m2featdim = {
@@ -225,8 +226,14 @@ def build_vit_sup_models(
         "sup_vith14_imagenet21k": 1280,
     }
 
-    model = VisionTransformer( 
-            model_type, reft_cfg, crop_size, num_classes=-1, vis=vis) 
+    if prompt_cfg is not None:
+        model = PromptedVisionTransformer(
+            model_type, reft_cfg, prompt_cfg,
+            crop_size, num_classes=-1, vis=vis
+        )
+    else:
+        model = VisionTransformer( 
+                model_type, reft_cfg, crop_size, num_classes=-1, vis=vis) 
     
     if load_pretrain:
         model.load_from(np.load(os.path.join(model_root, MODEL_ZOO[model_type])))

@@ -4,10 +4,9 @@ Model construction functions.
 """
 from tabnanny import verbose
 import torch
-
 from .vit_models import ViT, Swin, SSLViT
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 # Supported model types
 _MODEL_TYPES = {
     "vit": ViT,
@@ -15,8 +14,8 @@ _MODEL_TYPES = {
     "ssl-vit": SSLViT,
 }
 
-
-def build_model(cfg):
+import os
+def build_model(cfg, args):
     """
     build model here
     """
@@ -30,8 +29,9 @@ def build_model(cfg):
     # Construct the model
     train_type = cfg.MODEL.TYPE
     model = _MODEL_TYPES[train_type](cfg)
-
     log_model_info(model, verbose=cfg.DBG)
+
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
     model, device = load_model_to_device(model, cfg)
     logger.info(f"Device used for model: {device}")
 

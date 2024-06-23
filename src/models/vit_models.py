@@ -1,18 +1,16 @@
 #!/usr/bin/env python3
-
 """
 ViT-related models
 Note: models return logits instead of prob
 """
 import torch.nn as nn
-
 from .build_vit_backbone import (
     build_vit_sup_models, build_swin_model,
     build_mocov3_model, build_mae_model
 )
 from .mlp import MLP
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 class ViT(nn.Module):
@@ -25,28 +23,34 @@ class ViT(nn.Module):
             reft_cfg = cfg.MODEL.REFT
         else:
             reft_cfg = None
-            
-        if cfg.MODEL.TRANSFER_TYPE != "end2end" and "prompt" not in cfg.MODEL.TRANSFER_TYPE:
+
+        if "prompt" in cfg.MODEL.TRANSFER_TYPE:
+            prompt_cfg = cfg.MODEL.PROMPT
+        else:
+            prompt_cfg = None
+
+        if cfg.MODEL.TRANSFER_TYPE != "end2end" and "reft" not in cfg.MODEL.TRANSFER_TYPE:
             # linear, cls, tiny-tl, parital, adapter
             self.froze_enc = True
         else:
             # prompt, end2end, cls+prompt
             self.froze_enc = False
 
-        self.build_backbone(cfg, reft_cfg, load_pretrain, vis=vis)
+        self.build_backbone(cfg, reft_cfg, prompt_cfg, load_pretrain, vis=vis)
         self.cfg = cfg
         self.setup_head(cfg)
 
-    def build_backbone(self, cfg, reft_cfg, load_pretrain, vis):
+    def build_backbone(self, cfg, reft_cfg, prompt_cfg, load_pretrain, vis):
         transfer_type = cfg.MODEL.TRANSFER_TYPE
         self.enc, self.feat_dim = build_vit_sup_models(
-            cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, reft_cfg, cfg.MODEL.MODEL_ROOT, load_pretrain, vis
+            cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, reft_cfg, prompt_cfg, cfg.MODEL.MODEL_ROOT, load_pretrain, vis
         )
 
-        if transfer_type == "linear" or transfer_type == "side" or transfer_type == "reft" :
+        if transfer_type == "linear" or transfer_type == "reft" or transfer_type == "reft_prompt":
             for k, p in self.enc.named_parameters():
-                if 'reft' not in k: # for reft
+                if 'reft' not in k and "prompt" not in k: 
                     p.requires_grad = False
+
 ################################################################################################
         elif transfer_type == "end2end":
             logger.info("Enable all parameters update during training")
