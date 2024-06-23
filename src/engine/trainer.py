@@ -18,7 +18,9 @@ from ..solver.losses import build_loss
 from ..utils import logging
 from ..utils.train_utils import AverageMeter, gpu_mem_usage
 
-logger = logging.get_logger("visual_prompt")
+from torch.utils.tensorboard import SummaryWriter
+
+logger = logging.get_logger("visual_reft")
 
 
 class Trainer():
@@ -129,10 +131,13 @@ class Trainer():
         labels = data["label"]
         return inputs, labels
 
+
     def train_classifier(self, train_loader, val_loader, test_loader):
         """
         Train a classifier using epoch
         """
+
+        writer = SummaryWriter(log_dir=self.cfg.OUTPUT_DIR)
 
         # setup training epoch params
         total_epoch = self.cfg.SOLVER.TOTAL_EPOCH
@@ -157,6 +162,9 @@ class Trainer():
             data_time.reset()
 
             lr = self.scheduler.get_lr()[0]
+
+            writer.add_scalar("Epoch LR", lr, epoch+1)
+
             logger.info(
                 "Training {} / {} epoch, with learning rate {}".format(
                     epoch + 1, total_epoch, lr
@@ -209,12 +217,16 @@ class Trainer():
                         )
                         + "max mem: {:.1f} GB ".format(gpu_mem_usage())
                     )
+
+            writer.add_scalar("training loss", losses.avg, epoch+1)
+
             logger.info(
                 "Epoch {} / {}: ".format(epoch + 1, total_epoch)
                 + "avg data time: {:.2e}, avg batch time: {:.4f}, ".format(
                     data_time.avg, batch_time.avg)
                 + "average train loss: {:.4f}".format(losses.avg))
              # update lr, scheduler.step() must be called after optimizer.step() according to the docs: https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate  # noqa
+            
             self.scheduler.step()
 
             # Enable eval mode
@@ -235,6 +247,8 @@ class Trainer():
             except KeyError:
                 return
 
+            writer.add_scalar("Accuracy", curr_acc, epoch+1)
+
             if curr_acc > best_metric:
                 best_metric = curr_acc
                 best_epoch = epoch + 1
@@ -246,6 +260,8 @@ class Trainer():
             if patience >= self.cfg.SOLVER.PATIENCE:
                 logger.info("No improvement. Breaking out of loop.")
                 break
+
+        writer.close()
 
         # save the last checkpoints
         # if self.cfg.MODEL.SAVE_CKPT:

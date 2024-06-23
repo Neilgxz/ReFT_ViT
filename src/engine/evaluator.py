@@ -7,7 +7,7 @@ from typing import List, Union
 from .eval import multilabel
 from .eval import singlelabel
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 class Evaluator():
