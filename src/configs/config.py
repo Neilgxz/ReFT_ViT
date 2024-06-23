@@ -36,13 +36,45 @@ _C.MODEL.LINEAR = CfgNode()
 _C.MODEL.LINEAR.MLP_SIZES = []
 _C.MODEL.LINEAR.DROPOUT = 0.1
 # ----------------------------------------------------------------------
+# Prompt options
+# ----------------------------------------------------------------------
+_C.MODEL.PROMPT = CfgNode()
+_C.MODEL.PROMPT.NUM_TOKENS = 5
+_C.MODEL.PROMPT.LOCATION = "prepend"
+# prompt initalizatioin: 
+    # (1) default "random"
+    # (2) "final-cls" use aggregated final [cls] embeddings from training dataset
+    # (3) "cls-nolastl": use first 12 cls embeddings (exclude the final output) for deep prompt
+    # (4) "cls-nofirstl": use last 12 cls embeddings (exclude the input to first layer)
+_C.MODEL.PROMPT.INITIATION = "random"  # "final-cls", "cls-first12"
+_C.MODEL.PROMPT.CLSEMB_FOLDER = ""
+_C.MODEL.PROMPT.CLSEMB_PATH = ""
+_C.MODEL.PROMPT.PROJECT = -1  # "projection mlp hidden dim"
+_C.MODEL.PROMPT.DEEP = False # "whether do deep prompt or not, only for prepend location"
+_C.MODEL.PROMPT.NUM_DEEP_LAYERS = None  # if set to be an int, then do partial-deep prompt tuning
+_C.MODEL.PROMPT.REVERSE_DEEP = False  # if to only update last n layers, not the input layer
+_C.MODEL.PROMPT.DEEP_SHARED = False  # if true, all deep layers will be use the same prompt emb
+_C.MODEL.PROMPT.FORWARD_DEEP_NOEXPAND = False  # if true, will not expand input sequence for layers without prompt
+# how to get the output emb for cls head:
+    # original: follow the orignial backbone choice,
+    # img_pool: image patch pool only
+    # prompt_pool: prompt embd pool only
+    # imgprompt_pool: pool everything but the cls token
+_C.MODEL.PROMPT.VIT_POOL_TYPE = "original"
+_C.MODEL.PROMPT.DROPOUT = 0.0
+_C.MODEL.PROMPT.SAVE_FOR_EACH_EPOCH = False
+# ----------------------------------------------------------------------
 # REFT options
 # ----------------------------------------------------------------------
 _C.MODEL.REFT = CfgNode()
-_C.MODEL.REFT.ACTICATION = "linear" # activation function
-_C.MODEL.REFT.LAYERS = "ALL" # [0,1,2,...,10,11] or "ALL"
-_C.MODEL.REFT.RANK = 1 # low dimension rank
+_C.MODEL.REFT.ACTIVATION = "linear" # activation function
 _C.MODEL.REFT.DROPOUT = 0.05 # dropout rate
+_C.MODEL.REFT.RANK = 1 # low dimension rank
+_C.MODEL.REFT.ALLLAYERS = True
+_C.MODEL.REFT.LAYERS = [0]
+_C.MODEL.REFT.MULTIPLE = False # each representation has different intervention
+_C.MODEL.REFT.DOUBLE = False # global interventions for cls and image tokens seperately.
+_C.MODEL.REFT.CLSIMAGE = False # global intervention for image tokens
 # ----------------------------------------------------------------------
 # Solver options
 # ----------------------------------------------------------------------
@@ -76,7 +108,7 @@ _C.DATA.CROPSIZE = 224  # or 384
 _C.DATA.NO_TEST = False
 _C.DATA.BATCH_SIZE = 32
 # Number of data loader workers per training process
-_C.DATA.NUM_WORKERS = 4   ######## for test
+_C.DATA.NUM_WORKERS = 4   
 # Load data to pinned host memory
 _C.DATA.PIN_MEMORY = True
 _C.DIST_BACKEND = "nccl"
