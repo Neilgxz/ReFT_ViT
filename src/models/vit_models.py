@@ -46,11 +46,18 @@ class ViT(nn.Module):
             cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, reft_cfg, prompt_cfg, cfg.MODEL.MODEL_ROOT, load_pretrain, vis
         )
 
-        if transfer_type == "linear" or transfer_type == "reft" or transfer_type == "reft_prompt":
+        if transfer_type == "linear" or transfer_type == "reft":
+            for k, p in self.enc.named_parameters():
+                if 'reft' not in k: 
+                    p.requires_grad = False
+        elif transfer_type == "reft_prompt":   
             for k, p in self.enc.named_parameters():
                 if 'reft' not in k and "prompt" not in k: 
+                    p.requires_grad = False               
+        elif transfer_type == "prompt":
+            for k, p in self.enc.named_parameters():
+                if "prompt" not in k: 
                     p.requires_grad = False
-
 ################################################################################################
         elif transfer_type == "end2end":
             logger.info("Enable all parameters update during training")
