@@ -28,6 +28,7 @@ class PromptedTransformer(Transformer):
         
         self.prompt_config = prompt_config
         self.vit_config = config
+        self.reft_config = reft_config
         
         img_size = _pair(img_size)
         patch_size = _pair(config.patches["size"])
@@ -87,7 +88,10 @@ class PromptedTransformer(Transformer):
         # set train status for this class: disable all but the prompt-related modules
         if mode:
             # training:
-            self.encoder.train()
+            if self.reft_config is not None:
+                self.encoder.train()
+            else:
+                self.encoder.eval()
             self.embeddings.eval()
             self.prompt_proj.train()
             self.prompt_dropout.train()
