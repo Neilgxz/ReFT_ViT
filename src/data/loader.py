@@ -10,7 +10,7 @@ from .datasets.json_dataset import (
     CUB200Dataset, CarsDataset, DogsDataset, FlowersDataset, NabirdsDataset
 )
 
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 _DATASET_CATALOG = {
     "CUB": CUB200Dataset,
     'OxfordFlowers': FlowersDataset,
