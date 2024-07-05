@@ -31,7 +31,7 @@ from ..vtab_datasets import svhn
 from ..vtab_datasets.registry import Registry
 
 from ...utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 tf.config.experimental.set_visible_devices([], 'GPU')  # set tensorflow to not use gpu  # noqa
 DATASETS = [
     'caltech101',
