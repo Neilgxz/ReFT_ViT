@@ -12,7 +12,7 @@ from collections import Counter
 from ..transforms import get_transforms
 from ...utils import logging
 from ...utils.io_utils import read_json
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 class JSONDataset(torch.utils.data.Dataset):
