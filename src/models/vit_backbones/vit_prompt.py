@@ -24,7 +24,7 @@ class PromptedTransformer(Transformer):
         assert prompt_config.NUM_DEEP_LAYERS is None
         assert not prompt_config.DEEP_SHARED
         super(PromptedTransformer, self).__init__(
-            config, reft_config, img_size, vis)
+            config, reft_config, img_size, vis, prompt_cfg=prompt_config)
         
         self.prompt_config = prompt_config
         self.vit_config = config
