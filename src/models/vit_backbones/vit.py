@@ -495,14 +495,19 @@ class Block_REFT_single(nn.Module):
 import torch.fft as fft
 import torch_dct as dct
 class Block_REFT_single_fft(nn.Module):
-    def __init__(self, config, reft_cfg, vis):
+    def __init__(self, config, reft_cfg, vis, prompt_cfg=None):
         super(Block_REFT_single_fft, self).__init__()
         self.hidden_size = config.hidden_size
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn = Mlp(config)
         self.attn = Attention(config, vis)
-
+        
+        if prompt_cfg is not None:
+            self.num_tokens = prompt_cfg.NUM_TOKENS
+        else:
+            self.num_tokens = 0
+            
         # self.reft = ForeftIntervention(
         #     embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
         #     dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
@@ -791,7 +796,7 @@ class Block_REFT_multiple(nn.Module):
 
 ################################################################################################ 
 class Encoder(nn.Module):
-    def __init__(self, config, reft_cfg, n_patches, vis):
+    def __init__(self, config, reft_cfg, n_patches, vis, prompt_cfg=None):
         super(Encoder, self).__init__()
         self.vis = vis
         self.layer = nn.ModuleList()
@@ -809,7 +814,7 @@ class Encoder(nn.Module):
                     layer = Block_REFT_double(config, reft_cfg, vis)
                     self.layer.append(copy.deepcopy(layer))
                 elif reft_cfg.FFT:
-                    layer = Block_REFT_single_fft(config, reft_cfg, vis)
+                    layer = Block_REFT_single_fft(config, reft_cfg, vis, prompt_cfg)
                     self.layer.append(copy.deepcopy(layer))
                 else:
                     layer = Block_REFT_single(config, reft_cfg, vis)
@@ -847,7 +852,7 @@ class Encoder(nn.Module):
 
 
 class Transformer(nn.Module):
-    def __init__(self, config, reft_cfg, img_size, vis): 
+    def __init__(self, config, reft_cfg, img_size, vis, prompt_cfg=None): 
         super(Transformer, self).__init__()
 
         img_size = _pair(img_size)
@@ -855,7 +860,7 @@ class Transformer(nn.Module):
         self.n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
 
         self.embeddings = Embeddings(config, img_size=img_size)
-        self.encoder = Encoder(config, reft_cfg, self.n_patches, vis) 
+        self.encoder = Encoder(config, reft_cfg, self.n_patches, vis, prompt_cfg) 
 
     def forward(self, input_ids):
         embedding_output = self.embeddings(input_ids)
