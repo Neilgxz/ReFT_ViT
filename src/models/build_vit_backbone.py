@@ -7,6 +7,7 @@ from .vit_backbones.vit import VisionTransformer
 from .vit_backbones.vit_prompt import PromptedVisionTransformer
 from .vit_backbones.vit_moco_prompt import vit_base as prompt_vit_base
 from .vit_backbones.vit_moco import vit_base
+from .vit_backbones.vit_mae_prompt import build_model as prompt_mae_vit_model
 from .vit_backbones.vit_mae import build_model as mae_vit_model
 
 MODEL_ZOO = {
@@ -36,9 +37,12 @@ MODEL_ZOO = {
 
 
 def build_mae_model(
-    model_type, model_root
+    model_type, crop_size, reft_cfg, prompt_cfg, model_root
 ):
-    model = mae_vit_model(model_type)
+    if prompt_cfg is not None:
+        model = prompt_mae_vit_model(model_type, reft_cfg, prompt_cfg)
+    else:
+        model = mae_vit_model(model_type, reft_cfg)
     out_dim = model.embed_dim
 
     ckpt = os.path.join(model_root, MODEL_ZOO[model_type])

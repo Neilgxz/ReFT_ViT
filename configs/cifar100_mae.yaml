@@ -1,0 +1,27 @@
+_BASE_: "./base-reft.yaml"
+RUN_N_TIMES: 1
+DATA:
+  NAME: "vtab-cifar(num_classes=100)"
+  DATAPATH: "./Datasets"  
+  FEATURE: "mae_vitb16"
+  NUMBER_CLASSES: 100
+  MULTILABEL: False
+  BATCH_SIZE: 128
+MODEL:
+  TRANSFER_TYPE: "reft_prompt"
+  TYPE: "vit"
+  PROMPT:
+    NUM_TOKENS: 10
+    DEEP: True
+    DROPOUT: 0.1
+  REFT:
+    RANK: 1
+    ACTIVATION: "linear"
+    DROPOUT: 0.05
+    ALLLAYERS: True
+    LAYERS: [0]
+    DOUBLE: False
+    DCT: True
+SOLVER:
+  BASE_LR: 0.001
+  WEIGHT_DECAY: 0.0001

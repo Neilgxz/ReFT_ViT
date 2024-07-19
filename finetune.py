@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-major actions here for training VTAB datasets: use val200 to find best lr/wd, and retrain on train800val200, report results on test
+Finetune on VTAB and FGVC
 """
 import glob
 import numpy as np
