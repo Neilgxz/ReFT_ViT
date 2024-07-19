@@ -10,7 +10,6 @@ import PIL
 from collections import defaultdict
 from tabulate import tabulate
 from typing import Tuple
-os.environ["CUDA_VISIBLE_DEVICES"] = '0' 
 import torch
 from src.utils.file_io import PathManager
 from src.utils import logging
@@ -69,7 +68,7 @@ def default_argument_parser():
     """
     parser = argparse.ArgumentParser(description="visual-reft")
     parser.add_argument(
-        "--config-file", default="./configs/reft/cifar100_0.yaml", metavar="FILE", help="path to config file")
+        "--config-file", default="./configs/cifar100.yaml", metavar="FILE", help="path to config file")
     parser.add_argument(
         "--train-type", default="reft", help="training types")
     parser.add_argument(

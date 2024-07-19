@@ -5,6 +5,7 @@ import os
 from .vit_backbones.swin_transformer import SwinTransformer
 from .vit_backbones.vit import VisionTransformer
 from .vit_backbones.vit_prompt import PromptedVisionTransformer
+from .vit_backbones.vit_moco_prompt import vit_base as prompt_vit_base
 from .vit_backbones.vit_moco import vit_base
 from .vit_backbones.vit_mae import build_model as mae_vit_model
 
@@ -50,11 +51,14 @@ def build_mae_model(
 
 
 def build_mocov3_model(
-    model_type, model_root
+    model_type, crop_size, reft_cfg, prompt_cfg, model_root
 ):
     if model_type != "mocov3_vitb":
         raise ValueError("Does not support other arch")
-    model = vit_base()
+    if prompt_cfg is not None:
+        model = prompt_vit_base(reft_cfg, prompt_cfg)
+    else:
+        model = vit_base(reft_cfg)
     out_dim = 768
     ckpt = os.path.join(model_root,"mocov3_linear-vit-b-300ep.pth.tar")
 
@@ -239,4 +243,3 @@ def build_vit_sup_models(
         model.load_from(np.load(os.path.join(model_root, MODEL_ZOO[model_type])))
 
     return model, m2featdim[model_type]
-

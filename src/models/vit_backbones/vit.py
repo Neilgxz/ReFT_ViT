@@ -122,128 +122,6 @@ class LoreftIntervention(torch.nn.Module):
         self.rotate_layer.parametrizations.weight[0].base[:,:overload_w_width] = overload_w
         return
     
-    
-class NoreftIntervention(torch.nn.Module):
-    """
-    NoReFT(h) = h + W2^T(W1h + b − W2h)
-    """
-    def __init__(self, **kwargs):
-        super().__init__()
-        if "embed_dim" in kwargs and kwargs["embed_dim"] is not None:
-            self.register_buffer('embed_dim', torch.tensor(kwargs["embed_dim"]))
-            self.register_buffer('interchange_dim', torch.tensor(kwargs["embed_dim"]))
-        else:
-            self.embed_dim = None
-            self.interchange_dim = None
-
-        self.proj_layer = torch.nn.Linear(self.embed_dim, kwargs["low_rank_dimension"])
-        self.learned_source = torch.nn.Linear(self.embed_dim, kwargs["low_rank_dimension"])
-        self.dropout = torch.nn.Dropout(kwargs["dropout"] if "dropout" in kwargs else 0.0)
-        self.act_fn = ACT2FN["linear"] if "activation" not in kwargs or kwargs["activation"] is None else ACT2FN[kwargs["activation"]]
-        
-    def forward(
-        self, base, source=None, subspaces=None
-    ):
-        proj_base = self.proj_layer(base)
-        output = base + torch.matmul(
-            (self.act_fn(self.learned_source(base)) - proj_base), self.proj_layer.weight
-        )
-        return self.dropout(output.to(base.dtype))
-
-
-class ComplexLinear(torch.nn.Module):
-    def __init__(self, in_features, out_features, bias=True):
-        super(ComplexLinear, self).__init__()
-        self.in_features = in_features
-        self.out_features = out_features
-        self.real_linear = nn.Linear(in_features, out_features, bias=bias)
-        self.imaginary_linear = nn.Linear(in_features, out_features, bias=bias)
-
-        nn.init.xavier_uniform_(self.real_linear.weight)
-        if self.real_linear.bias is not None:
-            nn.init.normal_(self.real_linear.bias, std=1e-6)
-
-        nn.init.xavier_uniform_(self.imaginary_linear.weight)
-        if self.imaginary_linear.bias is not None:
-            nn.init.normal_(self.imaginary_linear.bias, std=1e-6)
-
-    def forward(self, input):
-
-        input_real = torch.real(input) 
-        input_imag = torch.imag(input) 
-
-        # Apply linear transformations
-        output_real = self.real_linear(input_real) - self.imaginary_linear(input_imag) # ac-bd
-        output_imaginary = self.real_linear(input_imag) + self.imaginary_linear(input_real) # ad+bc
-        
-        return output_real, output_imaginary
-
-
-class ForeftIntervention(torch.nn.Module):
-    """
-    NoReFT(h) = h + W2^T(W1h + b − W2h)
-    """
-    def __init__(self, **kwargs):
-        super().__init__()
-        if "embed_dim" in kwargs and kwargs["embed_dim"] is not None:
-            self.register_buffer('embed_dim', torch.tensor(kwargs["embed_dim"]))
-            self.register_buffer('interchange_dim', torch.tensor(kwargs["embed_dim"]))
-        else:
-            self.embed_dim = None
-            self.interchange_dim = None
-
-        self.proj_layer = ComplexLinear(self.embed_dim, kwargs["low_rank_dimension"],bias=False)
-        self.learned_source = ComplexLinear(self.embed_dim, kwargs["low_rank_dimension"])
-        self.dropout = torch.nn.Dropout(kwargs["dropout"] if "dropout" in kwargs else 0.0)
-        self.act_fn = ACT2FN["linear"] if "activation" not in kwargs or kwargs["activation"] is None else ACT2FN[kwargs["activation"]]
-        
-    def forward(
-        self, base, source=None, subspaces=None
-    ):
-        
-        base_real = torch.real(base) 
-        base_imag = torch.imag(base) 
-    
-        proj_base_real, proj_base_imag = self.proj_layer(base)
-        learned_source_real, learned_source_imag = self.learned_source(base)
-
-        temp_real = self.act_fn(learned_source_real)-proj_base_real # a
-        temp_imag = self.act_fn(learned_source_imag)-proj_base_imag # b
-
-        ac = torch.matmul(temp_real, self.proj_layer.real_linear.weight)
-        bd = torch.matmul(temp_imag, self.proj_layer.imaginary_linear.weight)
-        ad = torch.matmul(temp_real, self.proj_layer.imaginary_linear.weight)
-        bc = torch.matmul(temp_imag, self.proj_layer.real_linear.weight)
-
-        output_real = self.dropout(base_real + ac - bd)
-        output_imag = self.dropout(base_imag + ad + bc)
-
-        stacked_tensor = torch.stack((output_real, output_imag), dim=-1)
-        output = torch.view_as_complex(stacked_tensor)
-        
-        return output
-
-
-    def state_dict(self, *args, **kwargs):
-        """
-        Overwrite for data-efficiency.
-        """
-        state_dict = OrderedDict()
-        for k, v in self.learned_source.state_dict().items():
-            state_dict[k] = v
-        state_dict["rotate_layer"] = self.rotate_layer.weight.data
-        return state_dict
-
-    def load_state_dict(self, state_dict, *args, **kwargs):
-        """
-        Overwrite for data-efficiency.
-        """
-        self.learned_source.load_state_dict(state_dict, strict=False)
-        overload_w = state_dict["rotate_layer"]
-        overload_w_width = overload_w.shape[-1]
-        self.rotate_layer.parametrizations.weight[0].base[:,:overload_w_width] = overload_w
-        return
-    
 
 class Attention(nn.Module):
     def __init__(self, config, vis):
@@ -492,11 +370,10 @@ class Block_REFT_single(nn.Module):
             self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
 
 
-import torch.fft as fft
 import torch_dct as dct
-class Block_REFT_single_fft(nn.Module):
+class Block_REFT_single_dct(nn.Module):
     def __init__(self, config, reft_cfg, vis, prompt_cfg=None):
-        super(Block_REFT_single_fft, self).__init__()
+        super(Block_REFT_single_dct, self).__init__()
         self.hidden_size = config.hidden_size
         self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
@@ -508,11 +385,6 @@ class Block_REFT_single_fft(nn.Module):
         else:
             self.num_tokens = 0
             
-        # self.reft = ForeftIntervention(
-        #     embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
-        #     dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
-        # )
-
         self.reft = LoreftIntervention(
             embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
             dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
@@ -531,20 +403,12 @@ class Block_REFT_single_fft(nn.Module):
         x = self.ffn(x)
         x = x + h # x ([batch_size, 197, 768])
 
-        # ### apply one intervention to all patch tokens
-        # patch_token = x[:,1:,:]
-        # fft_patch_token = fft.fft(patch_token, dim=2)
-        # fft_intervened_patch_token = self.reft(fft_patch_token)
-        # ifft_intervened_patch_token = fft.ifft(fft_intervened_patch_token, dim=2)
-        # real_intervened_patch_token = torch.real(ifft_intervened_patch_token)
-        # intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), real_intervened_patch_token), dim=1)   
-
-        # ### apply one intervention to all patch tokens
-        # patch_token = x[:,11,:]
-        # dct_patch_token = dct.dct(patch_token)
-        # dct_intervened_patch_token = self.reft(dct_patch_token)
-        # idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
-        # intervened_x = torch.cat((x[:, 0:11, :].unsqueeze(1), idct_intervened_patch_token), dim=1)  
+        ### apply one intervention to all patch tokens
+        patch_token = x[:,(1+self.num_tokens):,:]
+        dct_patch_token = dct.dct(patch_token)
+        dct_intervened_patch_token = self.reft(dct_patch_token)
+        idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
+        intervened_x = torch.cat((x[:, 0:(1+self.num_tokens), :], idct_intervened_patch_token), dim=1)  
 
         ### apply one intervention to selected patch tokens
         # index = np.array(range(196))
@@ -552,24 +416,24 @@ class Block_REFT_single_fft(nn.Module):
         # selected = index[3:11,3:11]
         # selected = selected.reshape(-1)
 
-        selected = np.random.randint(0, 196, 50)
+        # selected = np.random.randint(0, 196, 50)
         
-        patch_token = x[:,selected+11,:]
-        dct_patch_token = dct.dct(patch_token)
-        dct_intervened_patch_token = self.reft(dct_patch_token)
-        idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
+        # patch_token = x[:,selected+11,:]
+        # dct_patch_token = dct.dct(patch_token)
+        # dct_intervened_patch_token = self.reft(dct_patch_token)
+        # idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
  
-        ### apply one intervention to each patch token
-        reft_outputs = []
-        j=0
-        for i in range(x.shape[1]-1):
-            if i not in selected:
-                reft_outputs.append(x[:,i+1,:].unsqueeze(1))
-            else:
-                reft_outputs.append(idct_intervened_patch_token[:,j,:].unsqueeze(1))
-                j += 1
-        intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
-        intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_tokens), dim=1)
+        # ### apply one intervention to each patch token
+        # reft_outputs = []
+        # j=0
+        # for i in range(x.shape[1]-1):
+        #     if i not in selected:
+        #         reft_outputs.append(x[:,i+1,:].unsqueeze(1))
+        #     else:
+        #         reft_outputs.append(idct_intervened_patch_token[:,j,:].unsqueeze(1))
+        #         j += 1
+        # intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
+        # intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_tokens), dim=1)
 
         return intervened_x, weights
 
@@ -715,88 +579,8 @@ class Block_REFT_double(nn.Module):
             self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
 
 
-class Block_REFT_multiple(nn.Module):
-    def __init__(self, config, reft_cfg, n_patches, vis):
-        super(Block_REFT_multiple, self).__init__()
-        self.hidden_size = config.hidden_size
-        self.attention_norm = LayerNorm(config.hidden_size, eps=1e-6)
-        self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
-        self.ffn = Mlp(config)
-        self.attn = Attention(config, vis)
-
-        self.refts = nn.ModuleList([
-            LoreftIntervention(
-            embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
-            dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
-        ) for _ in range(n_patches)])
-
-        for reft in self.refts:
-            nn.init.xavier_uniform_(reft.learned_source.weight)
-            nn.init.normal_(reft.learned_source.bias, std=1e-6)
-
-    def forward(self, x):
-        h = x
-        x = self.attention_norm(x)
-        x, weights = self.attn(x)
-        x = x + h
-
-        h = x
-        x = self.ffn_norm(x)
-        x = self.ffn(x)
-        x = x + h # x ([batch_size, 197, 768])
-
-        ### apply one intervention to each patch token
-        reft_outputs = []
-        for i in range(x.shape[1]-1):
-            intervened_patch_token = self.refts[i](x[:, i+1, :])
-            reft_outputs.append(intervened_patch_token.unsqueeze(1))
-        intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
-        intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_tokens), dim=1)  
-
-        return intervened_x, weights
-
-    def load_from(self, weights, n_block):
-        ROOT = f"Transformer/encoderblock_{n_block}"
-        with torch.no_grad():
-            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
-            query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
-            key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
-            value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
-            out_weight = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
-
-            query_bias = np2th(weights['/'.join((ROOT, ATTENTION_Q, "bias"))]).view(-1)
-            key_bias = np2th(weights['/'.join((ROOT, ATTENTION_K, "bias"))]).view(-1)
-            value_bias = np2th(weights['/'.join((ROOT, ATTENTION_V, "bias"))]).view(-1)
-            out_bias = np2th(weights['/'.join((ROOT, ATTENTION_OUT, "bias"))]).view(-1)
-
-            self.attn.query.weight.copy_(query_weight)
-            self.attn.key.weight.copy_(key_weight)
-            self.attn.value.weight.copy_(value_weight)
-            self.attn.out.weight.copy_(out_weight)
-            self.attn.query.bias.copy_(query_bias)
-            self.attn.key.bias.copy_(key_bias)
-            self.attn.value.bias.copy_(value_bias)
-            self.attn.out.bias.copy_(out_bias)
-
-            mlp_weight_0 = np2th(weights['/'.join((ROOT, FC_0, "kernel"))]).t()
-            mlp_weight_1 = np2th(weights['/'.join((ROOT, FC_1, "kernel"))]).t()
-            mlp_bias_0 = np2th(weights['/'.join((ROOT, FC_0, "bias"))]).t()
-            mlp_bias_1 = np2th(weights['/'.join((ROOT, FC_1, "bias"))]).t()
-
-            self.ffn.fc1.weight.copy_(mlp_weight_0)
-            self.ffn.fc2.weight.copy_(mlp_weight_1)
-            self.ffn.fc1.bias.copy_(mlp_bias_0)
-            self.ffn.fc2.bias.copy_(mlp_bias_1)
-
-            self.attention_norm.weight.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "scale"))]))
-            self.attention_norm.bias.copy_(np2th(weights['/'.join((ROOT, ATTENTION_NORM, "bias"))]))
-            self.ffn_norm.weight.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "scale"))]))
-            self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
-
-
-################################################################################################ 
 class Encoder(nn.Module):
-    def __init__(self, config, reft_cfg, n_patches, vis, prompt_cfg=None):
+    def __init__(self, config, reft_cfg, vis, prompt_cfg=None):
         super(Encoder, self).__init__()
         self.vis = vis
         self.layer = nn.ModuleList()
@@ -807,14 +591,11 @@ class Encoder(nn.Module):
             layers = reft_cfg.LAYERS
         for layer_index in range(config.transformer["num_layers"]):
             if layer_index in layers:
-                if reft_cfg.MULTIPLE:
-                    layer = Block_REFT_multiple(config, reft_cfg, n_patches, vis)
-                    self.layer.append(copy.deepcopy(layer))
-                elif reft_cfg.DOUBLE:
+                if reft_cfg.DOUBLE:
                     layer = Block_REFT_double(config, reft_cfg, vis)
                     self.layer.append(copy.deepcopy(layer))
-                elif reft_cfg.FFT:
-                    layer = Block_REFT_single_fft(config, reft_cfg, vis, prompt_cfg)
+                elif reft_cfg.DCT:
+                    layer = Block_REFT_single_dct(config, reft_cfg, vis, prompt_cfg)
                     self.layer.append(copy.deepcopy(layer))
                 else:
                     layer = Block_REFT_single(config, reft_cfg, vis)
@@ -822,7 +603,7 @@ class Encoder(nn.Module):
             else:
                 layer = Block(config, vis)
                 self.layer.append(copy.deepcopy(layer))
-################################################################################################  
+ 
     def forward(self, hidden_states):
         attn_weights = []
         for layer_block in self.layer:
@@ -855,12 +636,8 @@ class Transformer(nn.Module):
     def __init__(self, config, reft_cfg, img_size, vis, prompt_cfg=None): 
         super(Transformer, self).__init__()
 
-        img_size = _pair(img_size)
-        patch_size = _pair(config.patches["size"])
-        self.n_patches = (img_size[0] // patch_size[0]) * (img_size[1] // patch_size[1])
-
         self.embeddings = Embeddings(config, img_size=img_size)
-        self.encoder = Encoder(config, reft_cfg, self.n_patches, vis, prompt_cfg) 
+        self.encoder = Encoder(config, reft_cfg, vis, prompt_cfg) 
 
     def forward(self, input_ids):
         embedding_output = self.embeddings(input_ids)

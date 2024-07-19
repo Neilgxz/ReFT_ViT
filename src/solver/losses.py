@@ -5,7 +5,7 @@ import torch.nn.functional as F
 from typing import Optional
 
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 class SigmoidLoss(nn.Module):

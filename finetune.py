@@ -61,8 +61,8 @@ def find_best_lrwd(files, data_name):
             continue
 
         if val_result == best_val_acc:
-            frag_txt = f.split("\\run")[0]
-            cur_lr = float(frag_txt.split("\\lr")[-1].split("_wd")[0])
+            frag_txt = f.split("/run")[0]
+            cur_lr = float(frag_txt.split("/lr")[-1].split("_wd")[0])
             cur_wd = float(frag_txt.split("_wd")[-1])
             if best_lr is not None and cur_lr < best_lr:
                 # get the smallest lr to break tie for stability
@@ -72,8 +72,8 @@ def find_best_lrwd(files, data_name):
 
         elif val_result > best_val_acc:
             best_val_acc = val_result
-            frag_txt = f.split("\\run")[0]
-            best_lr = float(frag_txt.split("\\lr")[-1].split("_wd")[0])
+            frag_txt = f.split("/run")[0]
+            best_lr = float(frag_txt.split("/lr")[-1].split("_wd")[0])
             best_wd = float(frag_txt.split("_wd")[-1])
 
     return best_lr, best_wd
@@ -209,23 +209,11 @@ def train(cfg, args, final_runs):
 
 def get_lrwd_range(args):
 
-    if args.train_type == "finetune":
-        lr_range = [0.001, 0.0001, 0.0005, 0.005]
-        wd_range = [0.01, 0.001, 0.0001, 0.0]
-
-    elif args.train_type == "linear" or "reft":
+    if args.train_type == "linear" or "reft":
         lr_range = [
+            50.0, 25.0, 10.0, 
             5.0, 2.5, 1.0,
             0.5, 0.25, 0.1, 0.05
-        ]
-        wd_range = [0.01, 0.001, 0.0001, 0.0]
-
-    elif args.train_type == "linear_mae":
-        lr_range = [
-            50.0, 25., 10.0,
-            5.0, 2.5, 1.0,
-            0.5, 0.25, 0.1, 0.05,
-            0.025, 0.005, 0.0025,
         ]
         wd_range = [0.01, 0.001, 0.0001, 0.0]
 
@@ -246,16 +234,16 @@ def main(args):
                 continue
             train(cfg, args, final_runs=False)
 
-    # # final run 5 times with fixed seed
-    # random_seeds = [42, 44, 82, 100, 800]
-    # for run_idx, seed in enumerate(random_seeds):
-    #     try:
-    #         cfg = setup(
-    #             args, 0.1, 0.1, final_runs=True, run_idx=run_idx+1, seed=seed)
-    #     except ValueError:
-    #         # already ran
-    #         continue
-    #     train(cfg, args, final_runs=True)
+    # final run 5 times with fixed seed
+    random_seeds = [42, 44, 82, 100, 800]
+    for run_idx, seed in enumerate(random_seeds):
+        try:
+            cfg = setup(
+                args, 0.1, 0.1, final_runs=True, run_idx=run_idx+1, seed=seed)
+        except ValueError:
+            # already ran
+            continue
+        train(cfg, args, final_runs=True)
 
 
 if __name__ == '__main__':

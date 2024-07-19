@@ -18,7 +18,7 @@ class ViT(nn.Module):
 
     def __init__(self, cfg, load_pretrain=True, vis=False):
         super(ViT, self).__init__()
-################################################################################################
+
         if "reft" in cfg.MODEL.TRANSFER_TYPE:
             reft_cfg = cfg.MODEL.REFT
         else:
@@ -30,10 +30,8 @@ class ViT(nn.Module):
             prompt_cfg = None
 
         if cfg.MODEL.TRANSFER_TYPE != "end2end" and "reft" not in cfg.MODEL.TRANSFER_TYPE:
-            # linear, cls, tiny-tl, parital, adapter
             self.froze_enc = True
         else:
-            # prompt, end2end, cls+prompt
             self.froze_enc = False
 
         self.build_backbone(cfg, reft_cfg, prompt_cfg, load_pretrain, vis=vis)
@@ -58,7 +56,6 @@ class ViT(nn.Module):
             for k, p in self.enc.named_parameters():
                 if "prompt" not in k: 
                     p.requires_grad = False
-################################################################################################
         elif transfer_type == "end2end":
             logger.info("Enable all parameters update during training")
 
@@ -94,6 +91,42 @@ class ViT(nn.Module):
         """get a (batch_size, self.feat_dim) feature"""
         x = self.enc(x)  # batch_size x self.feat_dim
         return x
+
+
+class SSLViT(ViT):
+    """moco-v3 and mae model."""
+
+    def __init__(self, cfg):
+        super(SSLViT, self).__init__(cfg)
+
+    def build_backbone(self, cfg, reft_cfg, prompt_cfg, load_pretrain, vis):
+        if "moco" in cfg.DATA.FEATURE:
+            build_fn = build_mocov3_model
+        elif "mae" in cfg.DATA.FEATURE:
+            build_fn = build_mae_model
+
+        transfer_type = cfg.MODEL.TRANSFER_TYPE
+        self.enc, self.feat_dim = build_fn(
+            cfg.DATA.FEATURE, cfg.DATA.CROPSIZE, reft_cfg, prompt_cfg, cfg.MODEL.MODEL_ROOT
+        )
+
+        if transfer_type == "linear" or transfer_type == "reft":
+            for k, p in self.enc.named_parameters():
+                if 'reft' not in k: 
+                    p.requires_grad = False
+        elif transfer_type == "reft_prompt":   
+            for k, p in self.enc.named_parameters():
+                if 'reft' not in k and "prompt" not in k: 
+                    p.requires_grad = False               
+        elif transfer_type == "prompt":
+            for k, p in self.enc.named_parameters():
+                if "prompt" not in k: 
+                    p.requires_grad = False
+        elif transfer_type == "end2end":
+            logger.info("Enable all parameters update during training")
+        else:
+            raise ValueError("transfer type {} is not supported".format(
+                transfer_type))
 
 
 class Swin(ViT):
@@ -157,80 +190,6 @@ class Swin(ViT):
 
         elif transfer_type == "end2end":
             logger.info("Enable all parameters update during training")
-
-        else:
-            raise ValueError("transfer type {} is not supported".format(
-                transfer_type))
-
-
-class SSLViT(ViT):
-    """moco-v3 and mae model."""
-
-    def __init__(self, cfg):
-        super(SSLViT, self).__init__(cfg)
-
-    def build_backbone(self, prompt_cfg, cfg, adapter_cfg, load_pretrain, vis):
-        if "moco" in cfg.DATA.FEATURE:
-            build_fn = build_mocov3_model
-        elif "mae" in cfg.DATA.FEATURE:
-            build_fn = build_mae_model
-
-        self.enc, self.feat_dim = build_fn(
-            cfg.DATA.FEATURE, cfg.DATA.CROPSIZE,
-            prompt_cfg, cfg.MODEL.MODEL_ROOT, adapter_cfg=adapter_cfg
-        )
-
-        transfer_type = cfg.MODEL.TRANSFER_TYPE
-        # linear, prompt, cls, cls+prompt, partial_1
-        if transfer_type == "partial-1":
-            total_layer = len(self.enc.blocks)
-            for k, p in self.enc.named_parameters():
-                if "blocks.{}".format(total_layer - 1) not in k and "fc_norm" not in k and k != "norm": # noqa
-                    p.requires_grad = False
-        elif transfer_type == "partial-2":
-            total_layer = len(self.enc.blocks)
-            for k, p in self.enc.named_parameters():
-                if "blocks.{}".format(total_layer - 1) not in k and "blocks.{}".format(total_layer - 2) not in k and "fc_norm" not in k and k != "norm": # noqa
-                    p.requires_grad = False
-
-        elif transfer_type == "partial-4":
-            total_layer = len(self.enc.blocks)
-            for k, p in self.enc.named_parameters():
-                if "blocks.{}".format(total_layer - 1) not in k and "blocks.{}".format(total_layer - 2) not in k and "blocks.{}".format(total_layer - 3) not in k and "blocks.{}".format(total_layer - 4) not in k and "fc_norm" not in k and k != "norm": # noqa
-                    p.requires_grad = False
-
-        elif transfer_type == "linear" or transfer_type == "sidetune":
-            for k, p in self.enc.named_parameters():
-                p.requires_grad = False
-
-        elif transfer_type == "tinytl-bias":
-            for k, p in self.enc.named_parameters():
-                if 'bias' not in k:
-                    p.requires_grad = False
-
-        elif transfer_type == "prompt+bias":
-            for k, p in self.enc.named_parameters():
-                if "prompt" not in k and 'bias' not in k:
-                    p.requires_grad = False
-
-        elif transfer_type == "prompt" and prompt_cfg.LOCATION == "below":
-            for k, p in self.enc.named_parameters():
-                if "prompt" not in k and "patch_embed.proj.weight" not in k  and "patch_embed.proj.bias" not in k:
-                    p.requires_grad = False
-
-        elif transfer_type == "prompt":
-            for k, p in self.enc.named_parameters():
-                if "prompt" not in k:
-                    p.requires_grad = False
-
-        elif transfer_type == "end2end":
-            logger.info("Enable all parameters update during training")
-        
-        # adapter
-        elif transfer_type == "adapter":
-            for k, p in self.enc.named_parameters():
-                if "adapter" not in k:
-                    p.requires_grad = False
 
         else:
             raise ValueError("transfer type {} is not supported".format(

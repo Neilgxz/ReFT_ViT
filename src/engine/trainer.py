@@ -242,6 +242,8 @@ class Trainer():
 
             # check the patience
             t_name = "val_" + val_loader.dataset.name
+            if test_loader is not None:
+                t_name = "test_" + test_loader.dataset.name
             try:
                 curr_acc = self.evaluator.results[f"epoch_{epoch}"]["classification"][t_name]["top1"]
             except KeyError:

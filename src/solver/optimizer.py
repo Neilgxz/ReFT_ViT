@@ -13,7 +13,7 @@ import torch.optim as optim
 from typing import Any, Callable, Iterable, List, Tuple, Optional
 
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 def make_optimizer(

@@ -72,9 +72,8 @@ _C.MODEL.REFT.DROPOUT = 0.05 # dropout rate
 _C.MODEL.REFT.RANK = 1 # low dimension rank
 _C.MODEL.REFT.ALLLAYERS = True
 _C.MODEL.REFT.LAYERS = [0]
-_C.MODEL.REFT.MULTIPLE = False # each representation has different intervention
 _C.MODEL.REFT.DOUBLE = False # global interventions for cls and image tokens seperately.
-_C.MODEL.REFT.CLSIMAGE = False # global intervention for image tokens
+_C.MODEL.REFT.DCT = False # DCT version intervention
 # ----------------------------------------------------------------------
 # Solver options
 # ----------------------------------------------------------------------

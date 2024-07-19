@@ -36,7 +36,7 @@ def _cached_log_stream(filename):
 
 @functools.lru_cache()  # so that calling setup_logger multiple times won't add many handlers  # noqa
 def setup_logging(
-    num_gpu, num_shards, output="", name="visual_prompt", color=True):
+    num_gpu, num_shards, output="", name="visual_reft", color=True):
     """Sets up the logging."""
     # Enable logging only for the master process
     if is_master_process(num_gpu):

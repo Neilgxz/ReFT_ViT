@@ -85,7 +85,7 @@ def construct_test_loader(cfg):
     return _construct_loader(
         cfg=cfg,
         split="test",
-        batch_size=int(cfg.DATA.BATCH_SIZE / cfg.NUM_GPUS / 16), ########### for test
+        batch_size=int(cfg.DATA.BATCH_SIZE / cfg.NUM_GPUS),
         shuffle=False,
         drop_last=False,
     )

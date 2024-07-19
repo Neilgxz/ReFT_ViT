@@ -14,7 +14,7 @@ _MODEL_TYPES = {
     "ssl-vit": SSLViT,
 }
 
-import os
+
 def build_model(cfg, args):
     """
     build model here
@@ -31,7 +31,6 @@ def build_model(cfg, args):
     model = _MODEL_TYPES[train_type](cfg)
     log_model_info(model, verbose=cfg.DBG)
 
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(args.device)
     model, device = load_model_to_device(model, cfg)
     logger.info(f"Device used for model: {device}")
 

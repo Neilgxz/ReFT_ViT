@@ -9,7 +9,7 @@ from torch import nn
 from typing import List, Type
 
 from ..utils import logging
-logger = logging.get_logger("visual_prompt")
+logger = logging.get_logger("visual_reft")
 
 
 class MLP(nn.Module):
