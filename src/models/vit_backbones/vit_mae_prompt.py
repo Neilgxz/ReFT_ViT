@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 from functools import partial, reduce
 from operator import mul
-from timm.models.vision_transformer import _cfg
 from torch.nn import Dropout
 from .vit_mae import VisionTransformer
 from ...utils import logging

@@ -63,7 +63,6 @@ class PromptedVisionTransformerMoCo(VisionTransformerMoCo):
             # (batch_size, cls_token + n_prompt + n_patches, hidden_dim)
         else:
             raise ValueError("Other prompt locations are not supported")
-
         return x
 
     def embeddings(self, x):

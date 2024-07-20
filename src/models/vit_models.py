@@ -142,52 +142,18 @@ class Swin(ViT):
             prompt_cfg, cfg.MODEL.MODEL_ROOT
         )
 
-        # linear, prompt, cls, cls+prompt, partial_1
-        if transfer_type == "partial-1":
-            total_layer = len(self.enc.layers)
-            total_blocks = len(self.enc.layers[-1].blocks)
+        if transfer_type == "linear" or transfer_type == "reft":
             for k, p in self.enc.named_parameters():
-                if "layers.{}.blocks.{}".format(total_layer - 1, total_blocks - 1) not in k and "norm.weight" != k and "norm.bias" != k: # noqa
+                if 'reft' not in k: 
                     p.requires_grad = False
-
-        elif transfer_type == "partial-2":
-            total_layer = len(self.enc.layers)
+        elif transfer_type == "reft_prompt":   
             for k, p in self.enc.named_parameters():
-                if "layers.{}".format(total_layer - 1) not in k and "norm.weight" != k and "norm.bias" != k: # noqa
-                    p.requires_grad = False
-
-        elif transfer_type == "partial-4":
-            total_layer = len(self.enc.layers)
-            total_blocks = len(self.enc.layers[-2].blocks)
-
-            for k, p in self.enc.named_parameters():
-                if "layers.{}".format(total_layer - 1) not in k and "layers.{}.blocks.{}".format(total_layer - 2, total_blocks - 1) not in k and "layers.{}.blocks.{}".format(total_layer - 2, total_blocks - 2) not in k and "layers.{}.downsample".format(total_layer - 2) not in k and "norm.weight" != k and "norm.bias" != k: # noqa
-                    p.requires_grad = False
-
-        elif transfer_type == "linear" or transfer_type == "side":
-            for k, p in self.enc.named_parameters():
-                p.requires_grad = False
-
-        elif transfer_type == "tinytl-bias":
-            for k, p in self.enc.named_parameters():
-                if 'bias' not in k:
-                    p.requires_grad = False
-
-        elif transfer_type == "prompt" and prompt_cfg.LOCATION in ["below"]:
-            for k, p in self.enc.named_parameters():
-                if "prompt" not in k and "patch_embed" not in k:
-                    p.requires_grad = False
-
+                if 'reft' not in k and "prompt" not in k: 
+                    p.requires_grad = False               
         elif transfer_type == "prompt":
             for k, p in self.enc.named_parameters():
-                if "prompt" not in k:
+                if "prompt" not in k: 
                     p.requires_grad = False
-
-        elif transfer_type == "prompt+bias":
-            for k, p in self.enc.named_parameters():
-                if "prompt" not in k and 'bias' not in k:
-                    p.requires_grad = False
-
         elif transfer_type == "end2end":
             logger.info("Enable all parameters update during training")
 

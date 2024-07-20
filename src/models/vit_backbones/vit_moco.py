@@ -87,7 +87,7 @@ class LoreftIntervention(torch.nn.Module):
         self.rotate_layer.parametrizations.weight[0].base[:,:overload_w_width] = overload_w
         return
     
-
+    
 def drop_path(x, drop_prob: float = 0., training: bool = False):
     """Drop paths (Stochastic Depth) per sample (when applied in main path of residual blocks).
 

@@ -254,7 +254,7 @@ class Block(nn.Module):
     def load_from(self, weights, n_block):
         ROOT = f"Transformer/encoderblock_{n_block}"
         with torch.no_grad():
-            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+
             query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
@@ -290,7 +290,6 @@ class Block(nn.Module):
             self.ffn_norm.bias.copy_(np2th(weights['/'.join((ROOT, MLP_NORM, "bias"))]))
 
 
-################################################################################################  
 class Block_REFT_single(nn.Module):
     def __init__(self, config, reft_cfg, vis):
         super(Block_REFT_single, self).__init__()
@@ -317,14 +316,14 @@ class Block_REFT_single(nn.Module):
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
-        x = x + h # x ([batch_size, 197, 768])
+        x = x + h 
 
-        # ### add intervention for CLS tokens
+        ### Intervene CLS tokens
         # cls_token = x[:,0,:]
         # intervened_cls_token = self.reft(cls_token)
         # intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), x[:, 1:, :]), dim=1)
 
-        ### apply one intervention to all patch tokens
+        ### Intervene all image patch tokens
         patch_token = x[:,1:,:]
         intervened_patch_token = self.reft(patch_token)
         intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_token), dim=1)   
@@ -379,12 +378,12 @@ class Block_REFT_single_dct(nn.Module):
         self.ffn_norm = LayerNorm(config.hidden_size, eps=1e-6)
         self.ffn = Mlp(config)
         self.attn = Attention(config, vis)
-        
+
         if prompt_cfg is not None:
             self.num_tokens = prompt_cfg.NUM_TOKENS
         else:
             self.num_tokens = 0
-            
+
         self.reft = LoreftIntervention(
             embed_dim=config.hidden_size, low_rank_dimension=reft_cfg.RANK,
             dropout=reft_cfg.DROPOUT, activation=reft_cfg.ACTIVATION
@@ -401,46 +400,21 @@ class Block_REFT_single_dct(nn.Module):
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
-        x = x + h # x ([batch_size, 197, 768])
+        x = x + h 
 
-        ### apply one intervention to all patch tokens
+        ### Intervene all image patch tokens
         patch_token = x[:,(1+self.num_tokens):,:]
         dct_patch_token = dct.dct(patch_token)
         dct_intervened_patch_token = self.reft(dct_patch_token)
         idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
         intervened_x = torch.cat((x[:, 0:(1+self.num_tokens), :], idct_intervened_patch_token), dim=1)  
 
-        ### apply one intervention to selected patch tokens
-        # index = np.array(range(196))
-        # index = index.reshape((14,14))
-        # selected = index[3:11,3:11]
-        # selected = selected.reshape(-1)
-
-        # selected = np.random.randint(0, 196, 50)
-        
-        # patch_token = x[:,selected+11,:]
-        # dct_patch_token = dct.dct(patch_token)
-        # dct_intervened_patch_token = self.reft(dct_patch_token)
-        # idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
- 
-        # ### apply one intervention to each patch token
-        # reft_outputs = []
-        # j=0
-        # for i in range(x.shape[1]-1):
-        #     if i not in selected:
-        #         reft_outputs.append(x[:,i+1,:].unsqueeze(1))
-        #     else:
-        #         reft_outputs.append(idct_intervened_patch_token[:,j,:].unsqueeze(1))
-        #         j += 1
-        # intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
-        # intervened_x = torch.cat((x[:, 0, :].unsqueeze(1), intervened_patch_tokens), dim=1)
-
         return intervened_x, weights
 
     def load_from(self, weights, n_block):
         ROOT = f"Transformer/encoderblock_{n_block}"
         with torch.no_grad():
-            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+
             query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
@@ -503,47 +477,42 @@ class Block_REFT_double(nn.Module):
         h = x
         x = self.ffn_norm(x)
         x = self.ffn(x)
-        x = x + h # x ([batch_size, 197, 768])
+        x = x + h 
 
-        ### add intervention for CLS tokens
+        ### Intervene CLS tokens
         cls_token = x[:,0,:]
         intervened_cls_token = self.reft_cls(cls_token)
 
-        # ### apply one intervention to all patch tokens
-        # patch_token = x[:,1:,:]
-        # intervened_patch_token = self.reft_image(patch_token)
-
-        # intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), intervened_patch_token), dim=1)
-
-        ### apply one intervention to selected patch tokens
-        index = np.array(range(196))
-        index = index.reshape((14,14))
-        selected = index[3:11,3:11]
-        selected = selected.reshape(-1)
-
-        patch_token = x[:,selected+1,:]
+        ### Intervene selected image patch tokens
+        selected = np.random.randint(1, 196+1, 50)
+        
+        patch_token = x[:,selected,:]
         dct_patch_token = dct.dct(patch_token)
-        dct_intervened_patch_token = self.reft(dct_patch_token)
+        dct_intervened_patch_token = self.reft_image(dct_patch_token)
         idct_intervened_patch_token = dct.idct(dct_intervened_patch_token)
  
+ 
+        ### apply one intervention to each patch token
+
         ### apply one intervention to each patch token
         reft_outputs = []
         j=0
-        for i in range(x.shape[1]-1):
-            if i not in selected:
-                reft_outputs.append(x[:,i+1,:].unsqueeze(1))
+        for i in range(x.shape[1]):
+            if i==0:
+                reft_outputs.append(intervened_cls_token.unsqueeze(1))
+            elif i not in selected:
+                reft_outputs.append(x[:,i,:].unsqueeze(1))
             else:
                 reft_outputs.append(idct_intervened_patch_token[:,j,:].unsqueeze(1))
                 j += 1
-        intervened_patch_tokens = torch.cat(reft_outputs, dim=1)
-        intervened_x = torch.cat((intervened_cls_token.unsqueeze(1), intervened_patch_tokens), dim=1)  
+        intervened_x = torch.cat(reft_outputs, dim=1)
 
         return intervened_x, weights
-
+    
     def load_from(self, weights, n_block):
         ROOT = f"Transformer/encoderblock_{n_block}"
         with torch.no_grad():
-            # pjoin -> '/'.join((ROOT, ATTENTION_Q, "kernel")) for Windows
+
             query_weight = np2th(weights['/'.join((ROOT, ATTENTION_Q, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             key_weight = np2th(weights['/'.join((ROOT, ATTENTION_K, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
             value_weight = np2th(weights['/'.join((ROOT, ATTENTION_V, "kernel"))]).view(self.hidden_size, self.hidden_size).t()
@@ -603,7 +572,7 @@ class Encoder(nn.Module):
             else:
                 layer = Block(config, vis)
                 self.layer.append(copy.deepcopy(layer))
- 
+                
     def forward(self, hidden_states):
         attn_weights = []
         for layer_block in self.layer:

@@ -5,15 +5,12 @@ vit with prompt: a clean version with the default settings of VPT
 import math
 import torch
 import torch.nn as nn
-
 from functools import reduce
 from operator import mul
 from torch.nn.modules.utils import _pair
 from torch.nn import  Dropout
-
 from ..vit_backbones.vit import CONFIGS, Transformer, VisionTransformer
 from ...utils import logging
-
 logger = logging.get_logger("visual_reft")
 
 
